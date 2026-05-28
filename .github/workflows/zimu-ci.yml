@@ -1,7 +1,5 @@
 name: zimu
 on:
-  issues:
-    types: [opened]
   workflow_dispatch:
     inputs:
       url:
