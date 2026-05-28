@@ -1,0 +1,90 @@
+name: zimu
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'B站视频链接'
+        required: true
+
+permissions:
+  contents: write
+  issues: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: ${{ github.run_id }}
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  transcribe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
+      - name: 缓存模型
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache
+          key: asr-models-v1
+
+      - name: 安装依赖
+        run: |
+          pip install -U yt-dlp funasr > /dev/null 2>&1
+
+      - name: 转写
+        id: transcribe
+        env:
+          URL: ${{ github.event.inputs.url }}
+        run: |
+          bv=$(echo "$URL" | grep -oP '[A-Za-z0-9]+$')
+          echo "bv=$bv" >> "$GITHUB_OUTPUT"
+          python scripts/transcribe.py --url "$URL"
+
+      - name: 上传转写结果
+        uses: actions/upload-artifact@v4
+        with:
+          name: captions-${{ steps.transcribe.outputs.bv }}
+          path: captions/
+          retention-days: 1
+
+  deploy:
+    needs: transcribe
+    if: ${{ always() && needs.transcribe.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载所有转写结果
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 合并字幕文件
+        run: |
+          mkdir -p captions pages_out
+          find artifacts -name '*.json' -exec cp {} captions/ \;
+          find artifacts -name '*.srt' -exec cp {} captions/ \;
+          echo "合并后字幕文件: $(ls captions/*.json 2>/dev/null | wc -l) 个"
+
+      - name: 构建站点
+        run: |
+          cp site/* pages_out/ 2>/dev/null || true
+          python scripts/build_site.py --output-dir pages_out
+          cp -r captions pages_out/captions
+
+      - name: 上传 Pages 产物
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages_out
+
+      - name: 部署到 GitHub Pages
+        uses: actions/deploy-pages@v4
