@@ -4,7 +4,17 @@ on:
     inputs:
       url:
         description: 'B站视频链接'
-        required: true
+        required: false
+      audio_url:
+        description: '直接音频 CDN URL（由本地脚本生成，绕过地域限制）'
+        required: false
+      bv_id:
+        description: 'BV 号（audio_url 模式必填）'
+        required: false
+      title:
+        description: '视频标题'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -40,8 +50,9 @@ jobs:
         run: |
           pip install -U funasr 2>&1 | tail -3
 
-      - name: 转写
-        id: transcribe
+      - name: 模式一：直接 URL 转写
+        if: ${{ github.event.inputs.url != '' }}
+        id: mode-url
         env:
           URL: ${{ github.event.inputs.url }}
         run: |
@@ -49,10 +60,41 @@ jobs:
           echo "bv=$bv" >> "$GITHUB_OUTPUT"
           python scripts/transcribe.py --url "$URL"
 
+      - name: 模式二：CDN URL 转写
+        if: ${{ github.event.inputs.audio_url != '' }}
+        id: mode-cdn
+        env:
+          AUDIO_URL: ${{ github.event.inputs.audio_url }}
+          BV_ID: ${{ github.event.inputs.bv_id }}
+          TITLE: ${{ github.event.inputs.title }}
+        run: |
+          bv="${BV_ID:-unknown}"
+          echo "bv=$bv" >> "$GITHUB_OUTPUT"
+          mkdir -p captions
+
+          # 下载音频
+          curl -s -L -o audio.m4s \
+            -H "Referer: https://www.bilibili.com" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+            "$AUDIO_URL"
+          echo "下载完成: $(du -h audio.m4s | cut -f1)"
+
+          # 转换
+          ffmpeg -y -i audio.m4s -ar 16000 -ac 1 audio.wav 2>/dev/null
+
+          # 转写
+          python scripts/transcribe.py --audio audio.wav --bv_id "$bv"
+
+      - name: 设置 BV 输出
+        id: bv
+        run: |
+          bv="${{ steps.mode-url.outputs.bv }}${{ steps.mode-cdn.outputs.bv }}"
+          echo "bv=$bv" >> "$GITHUB_OUTPUT"
+
       - name: 上传转写结果
         uses: actions/upload-artifact@v4
         with:
-          name: captions-${{ steps.transcribe.outputs.bv }}
+          name: captions-${{ steps.bv.outputs.bv }}
           path: captions/
           retention-days: 1
 
