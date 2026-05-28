@@ -141,4 +141,4 @@ print(json.dumps(urls))
           ISSUE: ${{ needs.parse.outputs.issue_number }}
         run: |
           gh issue edit "$ISSUE" --add-label "completed" --remove-label "processing"
-          gh issue comment "$ISSUE" --body "✅ 全部转写完成，查看: https://YOUR_USER.github.io/zimu"
+          gh issue comment "$ISSUE" --body "✅ 全部转写完成，查看: https://743v45.github.io/zimu"

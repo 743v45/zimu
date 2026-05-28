@@ -7,7 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
-from utils import CAPTIONS_DIR, load_index, save_index
+from utils import CAPTIONS_DIR
 
 
 def rebuild_index(output_dir: Path):
@@ -78,7 +78,7 @@ document.getElementById('submit-btn').addEventListener('click', () => {{
   if (!urls) return;
   const lines = urls.split('\\n').filter(Boolean);
   const body = lines.map(u => `- ${{u}}`).join('\\n');
-  window.open('https://github.com/YOUR_USER/YOUR_REPO/issues/new?template=submit.yaml&body=' + encodeURIComponent(body));
+  window.open('https://github.com/743v45/zimu/issues/new?template=submit.yaml&body=' + encodeURIComponent(body));
 }});
 </script>
 </body>

@@ -8,8 +8,8 @@
  * - 无 → 显示「提交转写」按钮
  */
 
-const GITHUB_PAGES_BASE = 'https://YOUR_USER.github.io/zimu';
-const GITHUB_REPO = 'YOUR_USER/YOUR_REPO';
+const GITHUB_PAGES_BASE = 'https://743v45.github.io/zimu';
+const GITHUB_REPO = '743v45/zimu';
 
 let segments = [];
 let currentBv = '';
