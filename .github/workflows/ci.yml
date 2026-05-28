@@ -1,0 +1,152 @@
+name: 字幕转写
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'B站视频链接'
+        required: true
+
+permissions:
+  contents: write
+  issues: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: ${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  parse:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'issues' }}
+    outputs:
+      matrix: ${{ steps.extract.outputs.matrix }}
+      issue_number: ${{ steps.extract.outputs.issue_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 提取链接
+        id: extract
+        env:
+          BODY: ${{ github.event.issue.body }}
+        run: |
+          urls=$(echo "$BODY" | grep -oP 'https?://[^\s]*(?:bilibili\.com/video/[A-Za-z0-9]+|b23\.tv/[A-Za-z0-9]+)' || true)
+
+          if [ -z "$urls" ]; then
+            echo "matrix=[]" >> "$GITHUB_OUTPUT"
+            echo "issue_number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+            gh issue comment "${{ github.event.issue.number }}" --body "❌ 未找到有效的 B站视频链接"
+            gh issue edit "${{ github.event.issue.number }}" --add-label "invalid" --remove-label "pending"
+            exit 0
+          fi
+
+          count=$(echo "$urls" | sort -u | wc -l)
+          json=$(echo "$urls" | sort -u | python3 -c "
+import json, sys
+urls = [l.strip() for l in sys.stdin.read().strip().split('\n') if l.strip()]
+print(json.dumps(urls))
+          ")
+
+          echo "matrix=$json" >> "$GITHUB_OUTPUT"
+          echo "issue_number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+          gh issue edit "${{ github.event.issue.number }}" --add-label "processing" --remove-label "pending"
+          gh issue comment "${{ github.event.issue.number }}" --body "🔄 收到 $count 个视频，开始并行转写…"
+
+  transcribe:
+    needs: parse
+    if: ${{ always() && (needs.parse.outputs.matrix != '[]' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        url: ${{ github.event_name == 'workflow_dispatch' && fromJson(format('["{0}"]', github.event.inputs.url)) || fromJson(needs.parse.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
+      - name: 缓存模型
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache
+          key: asr-models-v1
+
+      - name: 安装依赖
+        run: |
+          pip install -U yt-dlp funasr > /dev/null 2>&1
+
+      - name: 转写
+        id: transcribe
+        env:
+          URL: ${{ matrix.url }}
+        run: |
+          bv=$(echo "$URL" | grep -oP '[A-Za-z0-9]+$')
+          echo "bv=$bv" >> "$GITHUB_OUTPUT"
+          python scripts/transcribe.py --url "$URL"
+
+      - name: 上传转写结果
+        uses: actions/upload-artifact@v4
+        with:
+          name: captions-${{ steps.transcribe.outputs.bv }}
+          path: captions/
+          retention-days: 1
+
+      - name: 评论进度
+        if: ${{ github.event_name == 'issues' }}
+        env:
+          BV: ${{ steps.transcribe.outputs.bv }}
+          ISSUE: ${{ needs.parse.outputs.issue_number }}
+        run: |
+          cap_file="captions/${BV}.json"
+          words=$(python3 -c "import json; d=json.load(open('$cap_file')); print(len(d.get('full_text','')))")
+          segs=$(python3 -c "import json; d=json.load(open('$cap_file')); print(len(d.get('segments',[])))")
+          gh issue comment "$ISSUE" --body "✅ 转写完成: \`$BV\` — $segs 段, $words 字"
+
+  deploy:
+    needs: [parse, transcribe]
+    if: ${{ always() && needs.transcribe.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载所有转写结果
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 合并字幕文件
+        run: |
+          mkdir -p captions pages_out
+          find artifacts -name '*.json' -exec cp {} captions/ \;
+          find artifacts -name '*.srt' -exec cp {} captions/ \;
+          echo "合并后字幕文件: $(ls captions/*.json 2>/dev/null | wc -l) 个"
+
+      - name: 构建站点
+        run: |
+          cp site/* pages_out/ 2>/dev/null || true
+          python scripts/build_site.py --output-dir pages_out
+          cp -r captions pages_out/captions
+
+      - name: 上传 Pages 产物
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages_out
+
+      - name: 部署到 GitHub Pages
+        uses: actions/deploy-pages@v4
+
+      - name: 标记 Issue 完成
+        if: ${{ github.event_name == 'issues' }}
+        env:
+          ISSUE: ${{ needs.parse.outputs.issue_number }}
+        run: |
+          gh issue edit "$ISSUE" --add-label "completed" --remove-label "processing"
+          gh issue comment "$ISSUE" --body "✅ 全部转写完成，查看: https://743v45.github.io/zimu"
