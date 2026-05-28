@@ -48,7 +48,7 @@ jobs:
 
       - name: 安装 Python 依赖
         run: |
-          pip install -U funasr 2>&1 | tail -3
+          pip install -U faster-whisper 2>&1 | tail -3
 
       - name: 模式一：直接 URL 转写
         if: ${{ github.event.inputs.url != '' }}

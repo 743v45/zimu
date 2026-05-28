@@ -17,7 +17,7 @@ from pathlib import Path
 
 from utils import caption_path, srt_path, segments_to_srt
 
-ASR_BACKEND = "sensevoice"  # "sensevoice" | "faster-whisper"
+ASR_BACKEND = "faster-whisper"  # "sensevoice" | "faster-whisper"
 
 # WBI 签名混淆表
 MIXIN_KEY_ENC_TAB = [
