@@ -1,12 +1,6 @@
 name: 字幕转写
 on:
-  issues:
-    types: [opened]
   workflow_dispatch:
-    inputs:
-      url:
-        description: 'B站视频链接'
-        required: true
 
 permissions:
   contents: write
