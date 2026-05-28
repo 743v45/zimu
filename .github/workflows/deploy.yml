@@ -1,0 +1,33 @@
+name: deploy-pages
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建站点
+        run: |
+          mkdir -p pages_out
+          cp site/* pages_out/
+          python scripts/build_site.py --output-dir pages_out
+          cp -r captions pages_out/captions 2>/dev/null || true
+
+      - name: 上传 Pages 产物
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages_out
+
+      - name: 部署到 GitHub Pages
+        uses: actions/deploy-pages@v4

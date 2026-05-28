@@ -25,6 +25,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: 准备 B站 cookies
+        if: ${{ secrets.BILIBILI_SESSDATA != '' }}
+        run: |
+          cat > cookies.txt <<EOF
+          # Netscape HTTP Cookie File
+          .bilibili.com	TRUE	/	FALSE	0	SESSDATA	${{ secrets.BILIBILI_SESSDATA }}
+          .bilibili.com	TRUE	/	FALSE	0	bili_jct	${{ secrets.BILIBILI_BILI_JCT }}
+          .bilibili.com	TRUE	/	FALSE	0	DedeUserID	${{ secrets.BILIBILI_DEDEUSERID }}
+          EOF
+          echo "Cookies 已准备"
+
       - name: 安装系统依赖
         run: |
           sudo apt-get update -qq
@@ -36,9 +47,10 @@ jobs:
           path: ~/.cache
           key: asr-models-v1
 
-      - name: 安装依赖
+      - name: 安装 Python 依赖
         run: |
-          pip install -U yt-dlp funasr > /dev/null 2>&1
+          pip install -U yt-dlp funasr 2>&1 | tail -5
+          yt-dlp --version
 
       - name: 转写
         id: transcribe
@@ -47,7 +59,16 @@ jobs:
         run: |
           bv=$(echo "$URL" | grep -oP '[A-Za-z0-9]+$')
           echo "bv=$bv" >> "$GITHUB_OUTPUT"
-          python scripts/transcribe.py --url "$URL"
+
+          COOKIES_OPT=""
+          if [ -f cookies.txt ]; then
+            COOKIES_OPT="--cookies cookies.txt"
+            echo "使用 cookies 下载"
+          else
+            echo "无 cookies，尝试无认证下载"
+          fi
+
+          python scripts/transcribe.py --url "$URL" $COOKIES_OPT
 
       - name: 上传转写结果
         uses: actions/upload-artifact@v4

@@ -16,19 +16,20 @@ from utils import caption_path, srt_path, segments_to_srt
 ASR_BACKEND = "sensevoice"  # "sensevoice" | "faster-whisper"
 
 
-def download_audio(url: str, output: Path):
+def download_audio(url: str, output: Path, cookies: Path = None):
     """使用 yt-dlp 下载音频"""
-    subprocess.run(
-        [
-            "yt-dlp",
-            "-x",
-            "--audio-format", "m4a",
-            "--audio-quality", "0",
-            "-o", str(output),
-            url,
-        ],
-        check=True,
-    )
+    cmd = [
+        "yt-dlp",
+        "-x",
+        "--audio-format", "m4a",
+        "--audio-quality", "0",
+        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "--referer", "https://www.bilibili.com",
+    ]
+    if cookies and cookies.exists():
+        cmd.extend(["--cookies", str(cookies)])
+    cmd.extend(["-o", str(output), url])
+    subprocess.run(cmd, check=True)
 
 
 def resample(input_path: Path, output_path: Path):
@@ -115,14 +116,20 @@ def build_transcript(segments: list[dict], bv_id: str, metadata: dict = None) ->
     }
 
 
-def get_metadata(url: str) -> dict:
+def get_metadata(url: str, cookies: Path = None) -> dict:
     """获取视频元数据"""
     import json as _json
-    result = subprocess.run(
-        ["yt-dlp", "--dump-json", url],
-        capture_output=True, text=True,
-    )
+    cmd = [
+        "yt-dlp", "--dump-json",
+        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "--referer", "https://www.bilibili.com",
+    ]
+    if cookies and cookies.exists():
+        cmd.extend(["--cookies", str(cookies)])
+    cmd.append(url)
+    result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
+        print(f"获取元数据失败: {result.stderr[:200]}")
         return {}
     try:
         data = _json.loads(result.stdout.strip().split("\n")[0])
@@ -140,7 +147,9 @@ def main():
     parser.add_argument("--url", help="B站视频链接")
     parser.add_argument("--bv_id", help="BV 号")
     parser.add_argument("--audio", type=Path, help="本地音频文件路径")
+    parser.add_argument("--cookies", type=Path, help="cookies.txt 路径")
     args = parser.parse_args()
+    cookies = args.cookies
 
     if not args.url and not args.audio:
         parser.error("需要 --url 或 --audio")
@@ -152,7 +161,7 @@ def main():
             print(f"无法解析 BV 号: {args.url}")
             sys.exit(1)
 
-        metadata = get_metadata(args.url)
+        metadata = get_metadata(args.url, cookies=cookies)
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_dir = Path(tmp)
@@ -160,7 +169,7 @@ def main():
             wav_path = tmp_dir / "audio.wav"
 
             print(f"下载音频: {args.url}")
-            download_audio(args.url, m4a_path)
+            download_audio(args.url, m4a_path, cookies=cookies)
 
             print("降采样到 16kHz...")
             resample(m4a_path, wav_path)
