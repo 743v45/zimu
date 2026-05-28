@@ -2,6 +2,11 @@ name: 字幕转写
 on:
   issues:
     types: [opened]
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'B站视频链接'
+        required: true
 
 permissions:
   contents: write
@@ -54,11 +59,11 @@ print(json.dumps(urls))
 
   transcribe:
     needs: parse
-    if: ${{ needs.parse.outputs.matrix != '[]' }}
+    if: ${{ always() && (needs.parse.outputs.matrix != '[]' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        url: ${{ fromJson(needs.parse.outputs.matrix) }}
+        url: ${{ github.event_name == 'workflow_dispatch' && fromJson(format('["{0}"]', github.event.inputs.url)) || fromJson(needs.parse.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -94,6 +99,7 @@ print(json.dumps(urls))
           retention-days: 1
 
       - name: 评论进度
+        if: ${{ github.event_name == 'issues' }}
         env:
           BV: ${{ steps.transcribe.outputs.bv }}
           ISSUE: ${{ needs.parse.outputs.issue_number }}
@@ -105,7 +111,7 @@ print(json.dumps(urls))
 
   deploy:
     needs: [parse, transcribe]
-    if: ${{ needs.parse.outputs.matrix != '[]' }}
+    if: ${{ always() && needs.transcribe.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -137,6 +143,7 @@ print(json.dumps(urls))
         uses: actions/deploy-pages@v4
 
       - name: 标记 Issue 完成
+        if: ${{ github.event_name == 'issues' }}
         env:
           ISSUE: ${{ needs.parse.outputs.issue_number }}
         run: |
