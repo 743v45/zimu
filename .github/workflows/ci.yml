@@ -1,4 +1,4 @@
-name: 字幕转写
+name: zimu
 on:
   workflow_dispatch:
 
