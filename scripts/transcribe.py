@@ -62,12 +62,21 @@ def _sign_params(params: dict, img_key: str, sub_key: str) -> dict:
     return params
 
 
-def get_video_info(bvid: str) -> dict:
+def _curl_get(url: str, cookies: str) -> str:
     r = subprocess.run(
-        ["curl", "-s", f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"],
+        ["curl", "-s",
+         "-H", "Referer: https://www.bilibili.com",
+         "-H", "Origin: https://www.bilibili.com",
+         "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+         "-H", f"Cookie: {cookies}", url],
         capture_output=True, text=True,
     )
-    data = json.loads(r.stdout)
+    return r.stdout
+
+
+def get_video_info(bvid: str, cookies: str) -> dict:
+    raw = _curl_get(f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}", cookies)
+    data = json.loads(raw)
     if data.get("code") != 0:
         print(f"获取视频信息失败: {data.get('message')}")
         return {}
@@ -81,23 +90,15 @@ def get_video_info(bvid: str) -> dict:
     }
 
 
-def get_audio_url(aid: int, cid: int) -> str | None:
-    cookies = _get_device_cookies()
+def get_audio_url(aid: int, cid: int, cookies: str) -> str | None:
     img_key, sub_key = _get_wbi_keys(cookies)
     params = _sign_params(
         {"avid": aid, "cid": cid, "qn": 0, "fnver": 0, "fnval": 16, "fourk": 0, "platform": "pc"},
         img_key, sub_key,
     )
     url = "https://api.bilibili.com/x/player/wbi/playurl?" + urllib.parse.urlencode(params)
-    r = subprocess.run(
-        ["curl", "-s",
-         "-H", "Referer: https://www.bilibili.com",
-         "-H", "Origin: https://www.bilibili.com",
-         "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-         "-H", f"Cookie: {cookies}", url],
-        capture_output=True, text=True,
-    )
-    data = json.loads(r.stdout)
+    raw = _curl_get(url, cookies)
+    data = json.loads(raw)
     if data.get("code") != 0:
         print(f"获取音频 URL 失败: {data.get('message')}")
         return None
@@ -194,7 +195,10 @@ def main():
             print(f"无法解析 BV 号: {args.url}")
             sys.exit(1)
 
-        info = get_video_info(bv_id)
+        cookies = _get_device_cookies()
+        print(f"设备指纹已获取")
+
+        info = get_video_info(bv_id, cookies)
         if not info:
             print("获取视频信息失败")
             sys.exit(1)
@@ -202,7 +206,7 @@ def main():
         metadata = {"title": info["title"], "uploader": info["uploader"], "duration": info["duration"]}
         print(f"视频: {info['title']} (aid={info['aid']}, cid={info['cid']})")
 
-        audio_url = get_audio_url(info["aid"], info["cid"])
+        audio_url = get_audio_url(info["aid"], info["cid"], cookies)
         if not audio_url:
             sys.exit(1)
 
