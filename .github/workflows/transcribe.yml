@@ -9,7 +9,7 @@ on:
         description: '直接音频 CDN URL（由本地脚本生成，绕过地域限制）'
         required: false
       bv_id:
-        description: 'BV 号（audio_url 模式必填）'
+        description: 'BV 号'
         required: false
       title:
         description: '视频标题'
@@ -50,7 +50,7 @@ jobs:
         run: |
           pip install -U faster-whisper 2>&1 | tail -3
 
-      - name: 模式一：直接 URL 转写
+      - name: 转写（URL 模式）
         if: ${{ github.event.inputs.url != '' }}
         id: mode-url
         env:
@@ -60,35 +60,73 @@ jobs:
           echo "bv=$bv" >> "$GITHUB_OUTPUT"
           python scripts/transcribe.py --url "$URL"
 
-      - name: 模式二：CDN URL 转写
+      - name: 转写（CDN 音频模式）
         if: ${{ github.event.inputs.audio_url != '' }}
         id: mode-cdn
         env:
           AUDIO_URL: ${{ github.event.inputs.audio_url }}
           BV_ID: ${{ github.event.inputs.bv_id }}
-          TITLE: ${{ github.event.inputs.title }}
         run: |
           bv="${BV_ID:-unknown}"
           echo "bv=$bv" >> "$GITHUB_OUTPUT"
           mkdir -p captions
-
-          # 下载音频
           curl -s -L -o audio.m4s \
             -H "Referer: https://www.bilibili.com" \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
             "$AUDIO_URL"
-          echo "下载完成: $(du -h audio.m4s | cut -f1)"
-
-          # 转换
           ffmpeg -y -i audio.m4s -ar 16000 -ac 1 audio.wav 2>/dev/null
-
-          # 转写
           python scripts/transcribe.py --audio audio.wav --bv_id "$bv"
+
+      - name: 转写（弹幕模式 - 仅需 BV 号）
+        if: ${{ github.event.inputs.bv_id != '' && github.event.inputs.audio_url == '' && github.event.inputs.url == '' }}
+        id: mode-danmaku
+        env:
+          BV_ID: ${{ github.event.inputs.bv_id }}
+        run: |
+          echo "bv=$BV_ID" >> "$GITHUB_OUTPUT"
+          mkdir -p captions
+          python3 -c "
+          import sys, json; sys.path.insert(0, 'scripts')
+          from transcribe import fetch_danmaku, build_transcript
+          from utils import segments_to_srt
+          from pathlib import Path
+
+          # 先获取 cid（弹幕 API 需要 oid=cid）
+          import subprocess
+          bv = '$BV_ID'
+          r = subprocess.run(['curl', '-s', f'https://api.bilibili.com/x/web-interface/view?bvid={bv}'], capture_output=True, text=True)
+          d = json.loads(r.stdout)
+          if d.get('code') != 0:
+              # 尝试用搜索 API 获取 aid
+              print(f'view API 失败: {d.get(\"message\")}, 尝试弹幕直取...')
+              # 用 BV 号推算 aid 或者直接用默认 cid
+              aid = 0
+              cid = 0
+          else:
+              aid = d['data']['aid']
+              cid = d['data']['cid']
+              print(f'视频: {d[\"data\"][\"title\"]}')
+
+          if cid:
+              segments = fetch_danmaku(aid, cid)
+              print(f'弹幕: {len(segments)} 条')
+          else:
+              # 尝试多个 cid 段
+              print('无法获取 cid，跳过')
+              sys.exit(1)
+
+          full_text = ' '.join(s['text'] for s in segments)
+          transcript = {'bv_id': bv, 'title': d.get('data',{}).get('title',''), 'segments': segments, 'full_text': full_text}
+          Path('captions').mkdir(exist_ok=True)
+          Path(f'captions/{bv}.json').write_text(json.dumps(transcript, ensure_ascii=False, indent=2))
+          Path(f'captions/{bv}.srt').write_text(segments_to_srt(segments))
+          print(f'保存: {len(segments)} 条弹幕')
+          "
 
       - name: 设置 BV 输出
         id: bv
         run: |
-          bv="${{ steps.mode-url.outputs.bv }}${{ steps.mode-cdn.outputs.bv }}"
+          bv="${{ steps.mode-url.outputs.bv }}${{ steps.mode-cdn.outputs.bv }}${{ steps.mode-danmaku.outputs.bv }}"
           echo "bv=$bv" >> "$GITHUB_OUTPUT"
 
       - name: 上传转写结果

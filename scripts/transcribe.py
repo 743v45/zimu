@@ -130,6 +130,59 @@ def resample(input_path: Path, output_path: Path):
     )
 
 
+def fetch_danmaku(aid: int, cid: int) -> list[dict]:
+    """从 B站弹幕 API 提取弹幕，转为字幕格式。无需登录，无地域限制。"""
+    r = subprocess.run(
+        ["curl", "-s", "-H", "Referer: https://www.bilibili.com",
+         f"https://api.bilibili.com/x/v2/dm/web/seg.so?type=1&oid={cid}&pid={aid}&segment_index=1"],
+        capture_output=True,
+    )
+    data = r.stdout
+    if len(data) < 10:
+        return []
+
+    def _varint(buf, p):
+        v, s = 0, 0
+        while p < len(buf):
+            b = buf[p]; p += 1; v |= (b & 0x7f) << s
+            if not (b & 0x80): break
+            s += 7
+        return v, p
+
+    pos, danmakus = 0, []
+    while pos < len(data):
+        tag = data[pos]; fn = tag >> 3; wt = tag & 7; pos += 1
+        if wt == 0:
+            _, pos = _varint(data, pos)
+        elif wt == 2:
+            length, pos = _varint(data, pos)
+            chunk = data[pos:pos+length]; pos += length
+            if fn == 1:
+                ip, dm = 0, {}
+                while ip < len(chunk):
+                    it = chunk[ip]; ifn = it >> 3; iwt = it & 7; ip += 1
+                    if iwt == 0:
+                        iv, ip = _varint(chunk, ip)
+                        if ifn == 2: dm['time_ms'] = iv
+                    elif iwt == 2:
+                        il, ip = _varint(chunk, ip)
+                        try: s = chunk[ip:ip+il].decode('utf-8')
+                        except: s = ''
+                        ip += il
+                        if ifn == 7: dm['text'] = s
+                if 'text' in dm and dm['text'].strip():
+                    danmakus.append(dm)
+        elif wt == 1: pos += 8
+        elif wt == 5: pos += 4
+
+    danmakus.sort(key=lambda d: d.get('time_ms', 0))
+    segments = []
+    for dm in danmakus:
+        t = dm.get('time_ms', 0) / 1000
+        segments.append({'start': round(t, 3), 'end': round(t + 3, 3), 'text': dm['text'].strip()})
+    return segments
+
+
 def transcribe_sensevoice(audio_path: Path) -> list[dict]:
     try:
         from funasr import AutoModel
@@ -206,14 +259,23 @@ def main():
         metadata = {"title": info["title"], "uploader": info["uploader"], "duration": info["duration"]}
         print(f"视频: {info['title']} (aid={info['aid']}, cid={info['cid']})")
 
-        audio_url = get_audio_url(info["aid"], info["cid"], cookies)
-        if not audio_url:
-            sys.exit(1)
+        # 路径一：优先提取弹幕（无需下载音频，无地域限制）
+        print("尝试提取弹幕...")
+        segments = fetch_danmaku(info["aid"], info["cid"])
+        if segments:
+            print(f"弹幕提取成功: {len(segments)} 条")
+            transcript = build_transcript(segments, bv_id, metadata)
+        else:
+            # 路径二：ASR 转写
+            print("无弹幕，尝试 ASR 转写...")
+            audio_url = get_audio_url(info["aid"], info["cid"], cookies)
+            if not audio_url:
+                sys.exit(1)
 
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_dir = Path(tmp)
-            m4s_path = tmp_dir / "audio.m4s"
-            wav_path = tmp_dir / "audio.wav"
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_dir = Path(tmp)
+                m4s_path = tmp_dir / "audio.m4s"
+                wav_path = tmp_dir / "audio.wav"
 
             print("下载音频...")
             download_audio_cdn(audio_url, m4s_path)
@@ -228,6 +290,7 @@ def main():
                 segments = transcribe_sensevoice(wav_path)
             else:
                 segments = transcribe_whisper(wav_path)
+            transcript = build_transcript(segments, bv_id, metadata)
     else:
         bv_id = args.bv_id or args.audio.stem
         wav_path = args.audio
@@ -238,8 +301,7 @@ def main():
             segments = transcribe_sensevoice(wav_path)
         else:
             segments = transcribe_whisper(wav_path)
-
-    transcript = build_transcript(segments, bv_id, metadata)
+        transcript = build_transcript(segments, bv_id, metadata)
     print(f"转写完成: {bv_id}, {len(segments)} 段, {len(transcript['full_text'])} 字")
 
     cap_dir = Path("captions")
