@@ -24,6 +24,7 @@ env:
 jobs:
   parse:
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'issues' }}
     outputs:
       matrix: ${{ steps.extract.outputs.matrix }}
       issue_number: ${{ steps.extract.outputs.issue_number }}
