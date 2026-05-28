@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "子幕 - B站字幕查询",
+  "version": "1.0.0",
+  "description": "在 B 站视频页面查询已转写的字幕，支持一键提交转写",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://*.bilibili.com/*",
+    "https://*.github.io/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://www.bilibili.com/video/*"],
+      "js": ["content.js"],
+      "css": ["style.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "icons": {
+    "128": "icon.png"
+  }
+}

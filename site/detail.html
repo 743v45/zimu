@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>字幕详情 - 子幕</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <a href="index.html" class="back">← 返回列表</a>
+  <h1 id="title">加载中…</h1>
+  <p id="meta"></p>
+</header>
+<main>
+  <div class="player-container">
+    <iframe id="bilibili-player" src="" frameborder="0" allowfullscreen></iframe>
+  </div>
+  <div id="subtitle-list" class="subtitle-list"></div>
+</main>
+<script>
+const params = new URLSearchParams(location.search);
+const bv = params.get('bv');
+
+async function load() {
+  const res = await fetch(`/zimu/captions/${bv}.json`);
+  if (!res.ok) {
+    document.getElementById('title').textContent = '字幕未找到';
+    return;
+  }
+  const data = await res.json();
+  document.getElementById('title').textContent = data.title || bv;
+  document.getElementById('meta').textContent = `UP: ${data.uploader || '未知'} · ${data.segments?.length || 0} 段 · ${(data.full_text || '').length} 字`;
+
+  const player = document.getElementById('bilibili-player');
+  player.src = `//player.bilibili.com/player.html?bvid=${bv}&autoplay=0&high_quality=1`;
+
+  const list = document.getElementById('subtitle-list');
+  (data.segments || []).forEach((seg, i) => {
+    const div = document.createElement('div');
+    div.className = 'subtitle-item';
+    div.dataset.start = seg.start;
+    div.dataset.end = seg.end;
+    div.innerHTML = `<span class="time">${fmt(seg.start)}</span><span class="text">${seg.text}</span>`;
+    div.addEventListener('click', () => {
+      const iframe = document.getElementById('bilibili-player');
+      iframe.contentWindow.postMessage({type: 'seek', value: seg.start}, '*');
+    });
+    list.appendChild(div);
+  });
+}
+load();
+
+function fmt(s) {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = (s % 60).toFixed(1);
+  return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(4,'0')}`;
+}
+</script>
+</body>
+</html>

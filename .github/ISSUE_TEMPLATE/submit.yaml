@@ -1,0 +1,28 @@
+name: 提交视频转写字幕
+description: 提交 B 站视频链接进行语音转写
+title: "[转写] "
+labels: [pending]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        支持批量提交，每行一个 B 站视频链接，多个链接会自动并发处理。
+
+  - type: textarea
+    id: urls
+    attributes:
+      label: B站视频链接
+      description: 每行一个 B 站视频 URL（支持 BV 号和 av 号）
+      placeholder: |
+        https://www.bilibili.com/video/BV1aA123b
+        https://www.bilibili.com/video/BV2bB456c
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认
+      options:
+        - label: 我确认这些视频的音频内容可以公开转写
+          required: true
